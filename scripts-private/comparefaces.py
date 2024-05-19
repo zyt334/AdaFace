@@ -1,7 +1,7 @@
 import os
 import argparse
 import time
-from evaluation.eval_utils import compare_face_folders_fast, set_tf_gpu
+from eval_utils import compare_face_folders_fast, set_tf_gpu, video_frame_extraction
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -13,6 +13,7 @@ def parse_args():
     parser.add_argument("--face_engine", dest='face_engine', type=str, default='deepface', 
                         choices=['deepface', 'insightface'],
                         help="face engine to use for comparison")
+    parser.add_argument("--video", dest="video_comp", action="store_true", default=False, help="video image comparison")
     args = parser.parse_args()
     return args
 
@@ -25,6 +26,17 @@ if __name__ == "__main__":
     skip_subjs = [ 'lilbub', 'jiffpom', 'princessmonstertruck' ]
 
     begin = time.time()
+    
+    # currently does not work if both path1 and path2 contain videos
+    # since the function writes to a common file and will overwrite each other
+    if args.video_comp:
+        if not args.folderpair_comp:
+            if video_frame_extraction(args.path1):
+                #set args.path1 to new dir containing extracted images
+                args.path1 = video_frame_extraction(args.path1)
+            if video_frame_extraction(args.path2):
+                #if args.path2 contains videos instead
+                args.path2 = video_frame_extraction(args.path2)
 
     if not args.folderpair_comp:
         if args.self_comp:
@@ -50,8 +62,20 @@ if __name__ == "__main__":
                 continue
             subdir_path1 = os.path.join(args.path1, subdir)
             subdir_path2 = os.path.join(args.path2, subdir)
+            if args.video_comp:
+                if video_frame_extraction(subdir_path1):
+                    #set args.path1 to new dir containing extracted images
+                    subdir_path1 = video_frame_extraction(subdir_path1)
+                if video_frame_extraction(subdir_path2):
+                    #if args.path2 contains videos instead
+                    subdir_path2 = video_frame_extraction(subdir_path2)
             if os.path.isdir(subdir_path1) == False or os.path.isdir(subdir_path2) == False:
                 continue
+            print("Pair comparing %s vs %s:" %(subdir_path1, subdir_path2))
+            compare_face_folders_fast(subdir_path1, subdir_path2, face_engine=args.face_engine)     
+        
+    end = time.time()
+    print("Time elapsed: %.2f seconds" %(end - begin))
             print("Pair comparing %s vs %s:" %(subdir_path1, subdir_path2))
             compare_face_folders_fast(subdir_path1, subdir_path2, face_engine=args.face_engine)     
         
