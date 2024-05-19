@@ -2,13 +2,14 @@ import os
 # Suppress tensorflow info and warning messages. This should be before importing deepface.
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-import torch
+#import torch
 import re
 import glob
 import time
 import numpy as np
 from PIL import Image
 import cv2
+from datetime import timedelta
 
 from evaluation.clip_eval import ImageDirEvaluator
 from evaluation.dino_eval import DINOEvaluator
@@ -578,3 +579,81 @@ def get_prompt_list(subject_string, z_prefix, z_suffix, background_string,
     orig_short_prompt_list = [ prompt.format(z_prefix, class_token,      z_suffix)  for prompt in orig_prompt_list ]
     orig_long_prompt_list  = [ prompt.format(z_prefix, class_long_token, z_suffix)  for prompt in orig_prompt_list ]
     return prompt_list, orig_short_prompt_list, orig_long_prompt_list
+
+def format_timedelta(td):
+    #function to format timedelta objects, used to name images extracted from video
+    result = str(td)
+    try:
+        result, ms = result.split(".")
+    except ValueError:
+        return (result + ".00").replace(":", "-")
+    ms = int(ms)
+    ms = round(ms / 1e4)
+    return f"{result}.{ms:02}".replace(":", "-")
+
+def get_saving_frames_durations(cap, saving_fps):
+    #A function that returns the list of durations of where to save the frames
+    s = []
+    # get the clip duration by dividing number of frames by the number of frames per second
+    clip_duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS)
+    # use np.arange() to make floating-point steps
+    for i in np.arange(0, clip_duration, 1 / saving_fps):
+        s.append(i)
+    return s
+
+def video_frame_extraction(vid_path, saved_frames_per_second=10):
+    vid_extensions = [ "mp4", "mov", "avi"]
+    # if vid_path directory is a video file
+    if os.path.isfile(vid_path):
+        vid_paths = [ vid_path ]
+    # check for videos in vid_path directory
+    else:
+        vid_paths = []
+        for ext in vid_extensions:
+            vid_paths += glob.glob(vid_path + "/*" + ext)
+    # create folder to house extracted images
+    filename = "extracted_images"
+    if not os.path.isdir(filename):
+        os.mkdir(filename)
+        
+    if len(vid_paths) == 0:
+        return False
+    
+    for vidfile in vid_paths:
+        cap = cv2.VideoCapture(vidfile)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        # if saved_frames_per_second > fps, set fps as new_saved_frames_per_second
+        new_saved_frames_per_second = min(fps, saved_frames_per_second)
+        # get the list of duration spots to save
+        saving_frames_durations = get_saving_frames_durations(cap, new_saved_frames_per_second)
+        # start the loop
+        count = 0
+        while True:
+            is_read, frame = cap.read()
+            if not is_read:
+                # break out of the loop if there are no frames to read
+                break
+            # get the duration by dividing the frame count by the FPS
+            frame_duration = count / fps
+            try:
+                # get the earliest duration to save
+                closest_duration = saving_frames_durations[0]
+            except IndexError:
+                # the list is empty, all duration frames were saved
+                break
+            if frame_duration >= closest_duration:
+                # if closest duration is less than or equals the frame duration, 
+                # then save the frame
+                frame_duration_formatted = format_timedelta(timedelta(seconds=frame_duration))
+                name = os.path.basename(vidfile)
+                cv2.imwrite(os.path.join(filename, f"frame-{frame_duration_formatted}.jpg"), frame)
+                # drop the duration spot from the list, since this duration spot is already saved
+                try:
+                    saving_frames_durations.pop(0)
+                except IndexError:
+                    pass
+            # increment the frame count
+            count += 1  
+    
+    image_path = os.path.abspath(filename)
+    return image_path
